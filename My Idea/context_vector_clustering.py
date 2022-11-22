@@ -27,7 +27,7 @@ def last_n_layers(n):
         Returns:
             tensor of shape (n, 768) of aggregated embeddings
         '''
-        torch.sum(stacked_token_embeddings[torch.arange(0, torch.sum(target_indices.size(0))), target_indices[:, 1], -n:], dim=1)
+        return torch.sum(stacked_token_embeddings[torch.arange(0, target_indices.size(0)), target_indices[:, 1], -n:], dim=1)
 
     return aggregate
 
@@ -55,7 +55,7 @@ class ContextClustering:
         torch.manual_seed(self.random_state)
         torch.cuda.manual_seed_all(self.random_state)
 
-    def _get_context_vectors(self, input_ids, attention_mask, target_mask, aggregation=last_n_layers(4)):
+    def _get_context_vectors(self, input_ids, attention_mask, target_mask, aggregation):
         '''
         Collects the context vectors from BERT for each term indicated in the target mask in the input sequence
 
@@ -90,7 +90,7 @@ class ContextClustering:
 
         return embedding_aggregates
 
-    def _collect_contexts(self, X):
+    def _collect_contexts(self, X, aggregation=last_n_layers(4)):
         '''
         Iterates over all rows in the dataset split and obtains the context vectors of target
         tokens
@@ -113,7 +113,7 @@ class ContextClustering:
             else:
                 attention_mask = torch.ones_like(input_ids)
 
-            embedding_aggregate = self._get_context_vectors(input_ids, attention_mask, target_mask)
+            embedding_aggregate = self._get_context_vectors(input_ids, attention_mask, target_mask, aggregation)
             context_vectors = torch.cat((context_vectors, embedding_aggregate))
 
         return context_vectors
@@ -137,7 +137,7 @@ class ContextClustering:
 
         context_vectors = self._collect_contexts(X)
 
-        self.set_seed()
+        self._set_seed()
         self.cluster_ids, self.cluster_centres = kmeans(context_vectors, self.n_clusters, distance=self.distance, device=self.device)
 
         return self
