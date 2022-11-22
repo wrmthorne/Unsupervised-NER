@@ -4,40 +4,55 @@ from tqdm import tqdm
 import torch
 import numpy as np
 import random
+from transformers import logging
 
-def last_n_layers(n):
-    '''
-    Aggregates embedding layers by summing the last n layers
-    
-    Args:
-        n: number of layers to aggregate over
+# Surpress unnecessary warnings about BERT model weights
+logging.set_verbosity_error()
 
-    Returns:
-        aggregate: callable
-    '''
-    def aggregate(stacked_token_embeddings, target_indices):
+
+class SumNLayers:
+    '''Aggregation over n embedding layers using summation'''
+    def __init__(self, n: int):
+        self.n = n
+
+    def __call__(self, stacked_token_embeddings, target_indices):
         '''
-        Performs the aggregation on the last n layers where n is specified in the parent function
+        Performs the summation on the last n layers where n is specified in the parent function
 
         Args:
-            stacked_token_embeddings: tensor of token embeddings that have been repeated n times where n is the
+            stacked_token_embeddings: tensor of token embeddings that have been repeated m times where m is the
                 total sum of 1s in the target_mask
             target_indices: tensor of indices in stacked_token_embeddings to calculate aggreagation over
 
         Returns:
-            tensor of shape (n, 768) of aggregated embeddings
+            tensor of shape (m, 768) of aggregated embeddings
         '''
-        return torch.sum(stacked_token_embeddings[torch.arange(0, target_indices.size(0)), target_indices[:, 1], -n:], dim=1)
+        return torch.sum(stacked_token_embeddings[torch.arange(0, target_indices.size(0)), target_indices[:, 1], -self.n:], dim=1)
 
-    return aggregate
+class CatNLayers:
+    '''Aggregation over n embedding layers using concatenation'''
+    def __init__(self, n: int):
+        self.n = n
+
+    def __call__(self, stacked_token_embeddings, target_indices):
+        '''
+        Performs the concatenation on the last n layers where n is specified in the parent function
+
+        Args:
+            stacked_token_embeddings: tensor of token embeddings that have been repeated m times where m is the
+                total sum of 1s in the target_mask
+            target_indices: tensor of indices in stacked_token_embeddings to calculate aggreagation over
+
+        Returns:
+            tensor of shape (m, n*768) of aggregated embeddings
+        '''
+        return torch.cat(list(stacked_token_embeddings[torch.arange(0, target_indices.size(0)), target_indices[:, 1], -self.n:].permute(1, 0, 2)), dim=1)
 
 class ContextClustering:
     def __init__(self, n_clusters=4, random_state=0, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         self.device = device
         self.n_clusters = n_clusters
         self.random_state = random_state
-        self.distance = 'cosine'
-        self.masked_targets = False
 
         self.cluster_ids = None
         self.cluster_centres = None
@@ -55,7 +70,7 @@ class ContextClustering:
         torch.manual_seed(self.random_state)
         torch.cuda.manual_seed_all(self.random_state)
 
-    def _get_context_vectors(self, input_ids, attention_mask, target_mask, aggregation):
+    def _get_context_vectors(self, input_ids, attention_mask, target_mask):
         '''
         Collects the context vectors from BERT for each term indicated in the target mask in the input sequence
 
@@ -86,11 +101,11 @@ class ContextClustering:
 
         # Use the sum of the last 4 embedding layers as an aggregation of context for the selected indices
         stacked_token_embeddings = token_embeddings.repeat(torch.sum(target_mask), 1, 1, 1)
-        embedding_aggregates = aggregation(stacked_token_embeddings, target_indices)
+        embedding_aggregates = self.aggregation(stacked_token_embeddings, target_indices)
 
         return embedding_aggregates
 
-    def _collect_contexts(self, X, aggregation=last_n_layers(4)):
+    def _collect_contexts(self, X):
         '''
         Iterates over all rows in the dataset split and obtains the context vectors of target
         tokens
@@ -99,10 +114,15 @@ class ContextClustering:
             X: Huggingface Dataset split with columns ['input_ids', 'target_mask']
 
         Returns:
-            tensor of shape (n, 768) where n is the total sum of 1s that appear in the target_mask
-                column    
+            tensor of shape (n, m*768) where n is the total sum of 1s that appear in the target_mask
+                column for m > 1 if concatenation of 2+ layers is used as as aggregation, else m = 1
         '''
-        context_vectors = torch.empty(0, 768).to(self.device)
+        if isinstance(self.aggregation, CatNLayers):
+            context_dim = self.aggregation.n * 768
+        else:
+            context_dim = 768
+
+        context_vectors = torch.empty(0, context_dim).to(self.device)
 
         for example in tqdm(X, desc='Collecting Contexts'):
             input_ids = torch.tensor(example['input_ids'])
@@ -113,12 +133,12 @@ class ContextClustering:
             else:
                 attention_mask = torch.ones_like(input_ids)
 
-            embedding_aggregate = self._get_context_vectors(input_ids, attention_mask, target_mask, aggregation)
+            embedding_aggregate = self._get_context_vectors(input_ids, attention_mask, target_mask)
             context_vectors = torch.cat((context_vectors, embedding_aggregate))
 
         return context_vectors
 
-    def fit(self, X, distance='cosine', masked_targets=False):
+    def fit(self, X, distance='cosine', masked_targets=False, aggregation=SumNLayers(4)):
         '''
         Finds all the relevant context vectors in the data and clusters them using KMeans
 
@@ -127,13 +147,16 @@ class ContextClustering:
             distance: Distance metric to use from ['cosine', 'euclidean']
             masked_targets: Attention masking strategy. True uses the inverse of the target mask
                 as the attention mask
+            aggregation: callable for aggregation strategy of context vectors
 
         Returns:
             self: Fitted estimator
         '''
         assert distance in ['cosine', 'euclidean']
+
         self.distance = distance
         self.masked_targets = masked_targets
+        self.aggregation = aggregation
 
         context_vectors = self._collect_contexts(X)
 
