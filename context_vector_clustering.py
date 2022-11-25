@@ -9,6 +9,35 @@ from transformers import logging
 # Surpress unnecessary warnings about BERT model weights
 logging.set_verbosity_error()
 
+
+class SumSubtokens:
+    '''Collects subtoken embedding aggregations into single embedding aggregation using summation'''
+    def __init__(self):
+        pass
+
+    def __call__(self, embedding_aggregate, target_mask):
+        '''
+        Finds all subtokens which compose input sentence words and sums the embedding aggregations
+        for each word's subtokens.
+
+        Args:
+            embedding_aggregate: Precomputed embedding aggregates for context vectors
+            target_mask: The tokens in the sequence for which the context vector was obtained,
+                incremented by word affiliation
+
+        Returns:
+            tensor of shape (m, 768) where m is the number of words the subwords compose into
+        '''
+        non_zero_chunks = target_mask[target_mask != 0]
+        binned_chunks = torch.bincount(non_zero_chunks)[1:]
+
+        chunked_aggregate = torch.split(embedding_aggregate, list(binned_chunks))
+        summed_chunks = [torch.sum(chunk, dim=0).unsqueeze(0) for chunk in chunked_aggregate]
+        try:
+            return torch.cat(summed_chunks, dim=0)
+        except Exception:
+            return embedding_aggregate
+
 class SelectLayerN:
     '''Extracts single embedding layer to represent token'''
     def __init__(self, n: int):
@@ -16,7 +45,7 @@ class SelectLayerN:
 
     def __call__(self, stacked_token_embeddings, target_indices):
         '''
-        Performs the summation on the last n layers where n is specified in the parent function
+        Extracts the nth layer as the chosen embedding layer
 
         Args:
             stacked_token_embeddings: tensor of token embeddings that have been repeated m times where m is the
@@ -24,9 +53,10 @@ class SelectLayerN:
             target_indices: tensor of indices in stacked_token_embeddings to calculate aggreagation over
 
         Returns:
-            tensor of shape (m, 768) of aggregated embeddings
+            tensor of shape (1, 768) of aggregated embeddings
         '''
-        return stacked_token_embeddings[torch.arange(0, target_indices.size(0)), target_indices[:, 1], self.n]
+        target_indices[:, 0] = torch.arange(0, target_indices.size(0))
+        return stacked_token_embeddings[target_indices[:, 0], target_indices[:, 1], self.n]
 
 class SumNLayers:
     '''
@@ -39,7 +69,7 @@ class SumNLayers:
 
     def __call__(self, stacked_token_embeddings, target_indices):
         '''
-        Performs the summation on the last n layers where n is specified in the parent function
+        Performs the summation over a specified range of layers
 
         Args:
             stacked_token_embeddings: tensor of token embeddings that have been repeated m times where m is the
@@ -49,7 +79,9 @@ class SumNLayers:
         Returns:
             tensor of shape (m, 768) of aggregated embeddings
         '''
-        return torch.sum(stacked_token_embeddings[torch.arange(0, target_indices.size(0)), target_indices[:, 1], self.start:self.end], dim=1)
+        target_indices[:, 0] = torch.arange(0, target_indices.size(0))
+        target_embed_layers = stacked_token_embeddings[target_indices[:, 0], target_indices[:, 1], self.start:self.end]
+        return torch.sum(target_embed_layers, dim=1)
 
 class MeanNLayers:
     '''
@@ -62,7 +94,7 @@ class MeanNLayers:
 
     def __call__(self, stacked_token_embeddings, target_indices):
         '''
-        Performs the mean on the last n layers where n is specified in the parent function
+        Performs the mean over a specified range of layers
 
         Args:
             stacked_token_embeddings: tensor of token embeddings that have been repeated m times where m is the
@@ -72,7 +104,9 @@ class MeanNLayers:
         Returns:
             tensor of shape (m, 768) of aggregated embeddings
         '''
-        return torch.mean(stacked_token_embeddings[torch.arange(0, target_indices.size(0)), target_indices[:, 1], self.start:self.end], dim=1)
+        target_indices[:, 0] = torch.arange(0, target_indices.size(0))
+        target_embed_layers = stacked_token_embeddings[target_indices[:, 0], target_indices[:, 1], self.start:self.end]
+        return torch.mean(target_embed_layers, dim=1)
 
 class CatNLayers:
     '''
@@ -86,7 +120,7 @@ class CatNLayers:
         
     def __call__(self, stacked_token_embeddings, target_indices):
         '''
-        Performs the concatenation on the last n layers where n is specified in the parent function
+        Performs the concatenation over a specified range of layers
 
         Args:
             stacked_token_embeddings: tensor of token embeddings that have been repeated m times where m is the
@@ -96,7 +130,10 @@ class CatNLayers:
         Returns:
             tensor of shape (m, n*768) of aggregated embeddings
         '''
-        return torch.cat(list(stacked_token_embeddings[torch.arange(0, target_indices.size(0)), target_indices[:, 1], self.start:self.end].permute(1, 0, 2)), dim=1)
+        target_indices[:, 0] = torch.arange(0, target_indices.size(0))
+        target_embed_layers = stacked_token_embeddings[target_indices[:, 0], target_indices[:, 1], self.start:self.end]
+        split_target_layers = list(target_embed_layers.permute(1, 0, 2))
+        return torch.cat(split_target_layers, dim=1)
 
 class ContextClustering:
     def __init__(self, n_clusters=4, random_state=0, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
@@ -150,8 +187,11 @@ class ContextClustering:
         target_indices = target_mask.to(self.device).nonzero()
 
         # Use the sum of the last 4 embedding layers as an aggregation of context for the selected indices
-        stacked_token_embeddings = token_embeddings.repeat(torch.sum(target_mask), 1, 1, 1)
+        stacked_token_embeddings = token_embeddings.repeat(target_indices.size(0), 1, 1, 1)
         embedding_aggregates = self.aggregation(stacked_token_embeddings, target_indices)
+
+        if self.subtoken_aggregation is not None:
+            embedding_aggregates = self.subtoken_aggregation(embedding_aggregates, target_mask)
 
         return embedding_aggregates
 
@@ -188,7 +228,7 @@ class ContextClustering:
 
         return context_vectors
 
-    def fit(self, X, distance='cosine', masked_targets=False, aggregation=SumNLayers(4)):
+    def fit(self, X, distance='cosine', masked_targets=False, aggregation=SumNLayers(4), subtoken_aggregation=None):
         '''
         Finds all the relevant context vectors in the data and clusters them using KMeans
 
@@ -207,6 +247,7 @@ class ContextClustering:
         self.distance = distance
         self.masked_targets = masked_targets
         self.aggregation = aggregation
+        self.subtoken_aggregation = subtoken_aggregation
 
         context_vectors = self._collect_contexts(X)
 
@@ -231,7 +272,3 @@ class ContextClustering:
         context_vectors = self._collect_contexts(X)
 
         return kmeans_predict(context_vectors, self.cluster_centres, distance=self.distance, device=self.device)
-
-
-
-

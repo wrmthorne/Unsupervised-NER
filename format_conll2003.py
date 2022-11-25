@@ -6,17 +6,40 @@ import os
 import json
 
 def process_batch(example, tokenizer):
+    '''
+    Encodes each of the tokens in the input sequence and creates an entry in the target mask
+    if the encoded token is a named entity. If an encoded token is a named entity, the token id
+    /component subtoken ids are given the same increment in the token mask to determine which
+    subtoken ids compose into a sinle word. 
+
+    e.g. tokens: ['hello beautiful world'], ner_tags: [2, 0, 4]
+        => '[CLS]' -> [101], 'hello' -> [34], 'beautiful' -> [21], 'world' -> [37, 98], '[SEP]' -> 102
+        => input_ids: [[101, 34, 21, 37, 98, 102]], target_mask [[0, 1, 0, 2, 2, 0]]
+
+    Args:
+        example: Row from dataset to be processed
+        tokenizer: Model tokenizer to be used
+
+    Returns:
+        dict of tensors with keys ['input_ids', 'target_mask']
+    '''
     target_mask = torch.tensor([0], dtype=torch.int8)
     input_ids = torch.tensor([101], dtype=int)
+    chunk_num = 1
 
     for token, ner_tag in zip(example['tokens'], example['ner_tags']):
         encoded_tok = tokenizer.encode(token, return_tensors='pt')[0, 1:-1]
 
         input_ids = torch.cat((input_ids, encoded_tok))
-        target_mask = torch.cat((target_mask, torch.full_like(encoded_tok, 1 if ner_tag != 0 else 0)))
 
-    target_mask = torch.cat((target_mask, torch.tensor([0]))).unsqueeze(0)
+        if ner_tag != 0:
+            target_mask = torch.cat((target_mask, torch.full_like(encoded_tok, chunk_num)))
+            chunk_num += 1
+        else:
+            target_mask = torch.cat((target_mask, torch.zeros_like(encoded_tok)))
+
     input_ids = torch.cat((input_ids, torch.tensor([102]))).unsqueeze(0)
+    target_mask = torch.cat((target_mask, torch.tensor([0]))).unsqueeze(0)
 
     return {'input_ids': input_ids, 'target_mask': target_mask}
 
