@@ -1,5 +1,5 @@
 from transformers import BertTokenizer, BertModel
-from kmeans_pytorch import kmeans, kmeans_predict
+from kmeans_pytorch import kmeans, kmeans_predict, pairwise_distance, pairwise_cosine
 from tqdm import tqdm
 import torch
 import numpy as np
@@ -10,10 +10,11 @@ from transformers import logging
 logging.set_verbosity_error()
 
 
-class SumSubtokens:
-    '''Collects subtoken embedding aggregations into single embedding aggregation using summation'''
-    def __init__(self):
-        pass
+class AggregateSubtokens:
+    '''Collects subtoken embedding aggregations into single embedding aggregation using some aggragation function'''
+    def __init__(self, aggregation_func):
+        assert aggregation_func in [torch.mean, torch.sum]
+        self.func = aggregation_func
 
     def __call__(self, embedding_aggregate, target_mask):
         '''
@@ -32,7 +33,7 @@ class SumSubtokens:
         binned_chunks = torch.bincount(non_zero_chunks)[1:]
 
         chunked_aggregate = torch.split(embedding_aggregate, list(binned_chunks))
-        summed_chunks = [torch.sum(chunk, dim=0).unsqueeze(0) for chunk in chunked_aggregate]
+        summed_chunks = [self.func(chunk, dim=0).unsqueeze(0) for chunk in chunked_aggregate]
         try:
             return torch.cat(summed_chunks, dim=0)
         except Exception:
@@ -57,6 +58,12 @@ class SelectLayerN:
         '''
         target_indices[:, 0] = torch.arange(0, target_indices.size(0))
         return stacked_token_embeddings[target_indices[:, 0], target_indices[:, 1], self.n]
+
+    def __len__(self):
+        return 1
+
+    def __str__(self):
+        return f'Select Layer {self.n}'
 
 class SumNLayers:
     '''
@@ -83,6 +90,12 @@ class SumNLayers:
         target_embed_layers = stacked_token_embeddings[target_indices[:, 0], target_indices[:, 1], self.start:self.end]
         return torch.sum(target_embed_layers, dim=1)
 
+    def __len__(self):
+        return len(torch.arange(13)[self.start:self.end])
+
+    def __str__(self):
+        return f'Sum Layers {self.start} to {self.end} - {len(self)} total'
+
 class MeanNLayers:
     '''
     Aggregation over consecutive embedding layers using mean. Start layer must be provided. If no end
@@ -108,6 +121,12 @@ class MeanNLayers:
         target_embed_layers = stacked_token_embeddings[target_indices[:, 0], target_indices[:, 1], self.start:self.end]
         return torch.mean(target_embed_layers, dim=1)
 
+    def __len__(self):
+        return len(torch.arange(13)[self.start:self.end])
+
+    def __str__(self):
+        return f'Mean Layers {self.start} to {self.end} - {len(self)} total'
+
 class CatNLayers:
     '''
     Aggregation over consecutive embedding layers using concatenation. Start layer must be provided. If no end
@@ -116,7 +135,6 @@ class CatNLayers:
     def __init__(self, start: int, end:int=None):
         self.start = start
         self.end = end
-        self.n = len(torch.arange(13)[self.start:self.end])
         
     def __call__(self, stacked_token_embeddings, target_indices):
         '''
@@ -134,6 +152,12 @@ class CatNLayers:
         target_embed_layers = stacked_token_embeddings[target_indices[:, 0], target_indices[:, 1], self.start:self.end]
         split_target_layers = list(target_embed_layers.permute(1, 0, 2))
         return torch.cat(split_target_layers, dim=1)
+
+    def __len__(self):
+        return len(torch.arange(13)[self.start:self.end])
+
+    def __str__(self):
+        return f'Concatenate Layers {self.start} to {self.end} - {len(self)} total'
 
 class ContextClustering:
     def __init__(self, n_clusters=4, random_state=0, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
@@ -208,7 +232,7 @@ class ContextClustering:
                 column for m > 1 if concatenation of 2+ layers is used as as aggregation, else m = 1
         '''
         if isinstance(self.aggregation, CatNLayers):
-            context_dim = self.aggregation.n * 768
+            context_dim = len(self.aggregation) * 768
         else:
             context_dim = 768
 
@@ -256,12 +280,13 @@ class ContextClustering:
 
         return self
 
-    def predict(self, X):
+    def predict(self, X, threshold=None):
         '''
         For an input set, predicts the cluster assignments
 
         Args:
             X: Huggingface Dataset split with columns ['input_ids', 'target_mask']
+            threshold: Maximum distance before being classified as misc.
 
         Returns:
             flat tensor of size n where n is the total sum of 1s that appear in the target_mask
@@ -271,4 +296,21 @@ class ContextClustering:
 
         context_vectors = self._collect_contexts(X)
 
-        return kmeans_predict(context_vectors, self.cluster_centres, distance=self.distance, device=self.device)
+        if threshold is not None:
+            context_vectors = context_vectors.to(self.device)
+
+            match self.distance:
+                case 'euclidean':
+                    assert 0 <= threshold, 'Threshold must be greater than or equal to 0'
+                    dis = pairwise_distance(context_vectors, self.cluster_centres)
+                case 'cosine':
+                    assert 0 <= threshold <= 1, 'Cosine threshold must be between 0 and 1'
+                    dis = pairwise_cosine(context_vectors, self.cluster_centres)
+
+            # Set cluster id of all elements outside of threshold to class -inf i.e. MISC
+            min = torch.min(dis, dim=1)
+            mask = torch.where(min.values <= threshold, 0, torch.inf)
+            return min.indices - mask
+        else:
+            return kmeans_predict(context_vectors, self.cluster_centres, distance=self.distance, device=self.device)
+            
