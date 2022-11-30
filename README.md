@@ -98,19 +98,37 @@ Full exploration of the results can be conducted in `grid_search_inspection.ipyn
 
 ## Results
 
-Maximum Accuracy: $62.303847%$ <br>
+Best parameters identified:
 
-| Aggregation | Layers | Subtoken Aggregation  | Seed | Accuracy | Threshold |
-| ----------- | ------ | --------------------- | ---- | -------- | --------- |
-| SumNLayers  | (-4, None) | torch.mean | 100 | 62.303847 | 1.0 |
-| MeanNLayers | (-4, None) | torch.mean | 100 | 62.303847 | 1.0 |
-| SumNLayers  | (-4, None) | torch.mean | 100 | 62.303847 | 0.6 |
-| MeanNLayers | (-4, None) | torch.mean	| 100 | 62.303847 | 0.6 |
+| Aggregation | Layers     | Subtoken Aggregation  | Threshold | **Accuracy** |
+| ----------- | ---------- | --------------------- | --------- | ------------ |
+| CatNLayers  | (-4, None) | torch.sum             | 0.6       | 52.02 ± 3.97 |
+| CatNLayers  | (-4, None) | torch.sum             | 1.0       | 52.02 ± 3.97 |
+
+Maximum Accuracy: $62.30%$
+
+| Aggregation | Layers     | Subtoken Aggregation  | Seed | Accuracy | Threshold |
+| ----------- | ---------- | --------------------- | ---- | -------- | --------- |
+| SumNLayers  | (-4, None) | torch.mean            | 100  | 62.30    | 1.0       |
+| MeanNLayers | (-4, None) | torch.mean            | 100  | 62.30    | 1.0       |
+| SumNLayers  | (-4, None) | torch.mean            | 100  | 62.30    | 0.6       |
+| MeanNLayers | (-4, None) | torch.mean	           | 100  | 62.30    | 0.6       |
+
+Max accuracy is a poor measure of performance. The stability of the model was very poor as performance relied heavily on starting initialisation of cluster centres. The averaged results over the three runs for one of these top results shows this instability well:
+
+| Aggregation | Layers | Subtoken Aggregation  | Threshold | **Accuracy**  |
+| ----------- | ------ | --------------------- | --------- | ------------- |
+| MeanNLayers | (-4, None) | torch.mean	       | 0.6       | 51.06 ± 11.25 |
+
 
 ## Discussion
 
-There is no sugarcoating the fact that the results are not amazing. Although the best accuracy achieved was 63%, the midrange over all three runs with the same parameters was only 51%, meaning the model is very unstable. The most stable and best predicting parameters appears, overwhelmingly, to be concatenation over the last 4 layers, subtoken aggregation by summation and a threshold of 0.6+. The thresholding result is interesting, in particular, because it indicates that the model is capped at a best accuracy of 75% under these conditions. For a threshold greater than 0.6, for these parameters, the model is predicting no entities outside of the three classes meaning, even with perfect prediction of every other entity, the model would never predict the 4th, MISC class. This is also the trend among the best performing parameters. This is indicative of an interesting point: trying to cluster MISC entities will not work as they are inherently dissimilar and the context vectors for entities within the PER, LOC and ORG clusters are not similar enough to set a reasonable threshold to exclude MISC entities.
+There is no sugarcoating the fact that the results are not amazing. Although the best accuracy achieved was 63%, the midrange over all three runs with the same parameters was only 51%, meaning the model is very unstable. The most stable and best predicting parameters appears, overwhelmingly, to be concatenation over the last 4 layers, subtoken aggregation by summation and a threshold of 0.6+. The thresholding result is interesting, in particular, because it indicates that the model is capped at a best accuracy of 75% under these conditions. For a threshold greater than 0.6, for these parameters, the model is predicting no entities outside of the three clusters meaning, even with perfect prediction of every other entity, the model would never predict the 4th, MISC class. This is also the trend among the best performing parameters. This is indicative of an interesting point: trying to cluster MISC entities will not work as they are inherently dissimilar and the context vectors for entities within the PER, LOC and ORG clusters are not similar enough to set a reasonable threshold to exclude MISC entities.
 
-An obvious note about these results is that the grid search was not comprehensive. Because of the number of permutations, only a limited scope was resonable explored. The layer ranges were chosen to be the last as they contain the most context specific information but combinations of earlier layers may contain more relevant information for the task. Taking non sequential layers or even all layers may also be more informative. That being said, given that the majority of the contextual information is concentrated in the final few layers, it is unlikely; hence, why they were not explored.
+A notable result is that, despite using 2 different aggregation strategies, the top 4 results all shared the same accuracy. The threshold discussion has been made but summation aggregation and mean aggregation should be unlikely to produce the same results, let alone the exact same result. A potential idea is that by aggregating the subtokens using mean, they are projected in such a different direction to any regular context vector and as such, are caught by some cluster centre that is away from the other two. `Check if this pattern appears without subtoken aggregation`
+
+An obvious note about these results is that the grid search was not comprehensive. Because of the number of permutations, only a limited scope was resonably explored. The layer ranges were chosen to be the last as they contain the most context specific information but combinations of earlier layers may contain more relevant information for the task. Taking non sequential layers or even all layers may also be more informative. All the top results used some aggregation over the final 4 layers, suggesting that using more layers (potentially to some limit) may yield improved performance.
 
 The final criticism to make about these results is that the context vectors are token dependent. For a given token $t$, the context vector for $t$ is very different to context vector $t\prime$, even if tokens $t_{-n}, \dots, t_{-1}, t_{+1}, \dots, t_{+m}$ are the same. Therefore, it is likely that the model will only perform effectively on seen vocabulary/contexts. Initially, masking the central token was conducted but results were extremely poor i.e. almost random.
+
+A positive result from this is to show that concatenation as an aggregation strategy is very stable. `calculate metric for this`
