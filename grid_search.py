@@ -71,8 +71,8 @@ def main():
     seeds = [0, 42, 100]
     aggregations = [CatNLayers, MeanNLayers, SumNLayers]
     layer_ranges = [(-2, None), (-3, None), (-4, None)]
-    subtoken_aggregation = [None, torch.sum, torch.mean]
-    thresholds = [0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
+    subtoken_aggregation = [None, AggregateSubtokens(torch.sum), AggregateSubtokens(torch.mean)]
+    thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 1]
 
     results = pd.DataFrame(columns=['Aggregation', 'Layers', 'Subtoken Aggregation?', 'Seed', 'Accuracy', 'Threshold'])
 

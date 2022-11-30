@@ -88,7 +88,7 @@ A grid search was performed to find the best combination of parameters. For each
 The following ranges were used in the grid search:
 
 Aggregation Strategies: `CatNLayers`, `SumNLayers`, `MeanNLayers` <br>
-Layer Ranges: `(-2, None)`, `(-3, None)`, `(-4, None)` <br>
+Layer Ranges: `(-2, None)`, `(-3, None)`, `(-4, None)` i.e. last 2, 3, or 4 layers<br>
 Subtoken Aggregations: `None`, `torch.sum`, `torch.mean` <br>
 Thresholds: `None`, `0.1`, `0.2`, `0.25`, `0.3`, `0.35`, `0.4`, `0.45`, `0.5`, `0.55`, `0.6`
 
