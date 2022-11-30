@@ -50,7 +50,7 @@ def collect_results(model_fit, tokenizer, val_data, agg_func, subtok_agg, l_rang
     results_dict = {
         'Aggregation': str(agg_func),
         'Layers': l_range,
-        'Subtoken Aggregation?': subtok_agg,
+        'Subtoken Aggregation?': str(subtok_agg),
         'Seed': seed,
         'Accuracy': best_acc,
         'Threshold': threshold
@@ -85,14 +85,14 @@ def main():
                             model = ContextClustering(n_clusters=4, random_state=seed)
                             model_fit = model.fit(dataset['train'], aggregation=agg_func(*l_range), subtoken_aggregation=subtok_agg)
                             df = collect_results(model_fit, tokenizer, dataset['validation'], agg_func, subtok_agg, l_range, seed)
-
-                            pd.concat((results, df), ignore_index=True)
                         else:
                             model = ContextClustering(n_clusters=3, random_state=seed)
                             model_fit = model.fit(dataset['train'], aggregation=agg_func(*l_range), subtoken_aggregation=subtok_agg)
 
                             for t in thresholds:
                                 df = collect_results(model_fit, tokenizer, dataset['validation'], agg_func, subtok_agg, l_range, seed, threshold=t, classes=[-np.inf, 0, 1, 2])
+
+                        results = pd.concat((results, df), ignore_index=True)
 
     results.to_pickle('./gridsearch_results.pkl')
 

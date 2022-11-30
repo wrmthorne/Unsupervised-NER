@@ -94,5 +94,23 @@ Thresholds: `None`, `0.1`, `0.2`, `0.25`, `0.3`, `0.35`, `0.4`, `0.45`, `0.5`, `
 
 The grid search code can be found in `grid_search.py`.
 
+Full exploration of the results can be conducted in `grid_search_inspection.ipynb`.
+
 ## Results
-[TO BE COMPLETED]
+
+Maximum Accuracy: $62.303847%$ <br>
+
+| Aggregation | Layers | Subtoken Aggregation  | Seed | Accuracy | Threshold |
+| ----------- | ------ | --------------------- | ---- | -------- | --------- |
+| SumNLayers  | (-4, None) | torch.mean | 100 | 62.303847 | 1.0 |
+| MeanNLayers | (-4, None) | torch.mean | 100 | 62.303847 | 1.0 |
+| SumNLayers  | (-4, None) | torch.mean | 100 | 62.303847 | 0.6 |
+| MeanNLayers | (-4, None) | torch.mean	| 100 | 62.303847 | 0.6 |
+
+## Discussion
+
+There is no sugarcoating the fact that the results are not amazing. Although the best accuracy achieved was 63%, the midrange over all three runs with the same parameters was only 51%, meaning the model is very unstable. The most stable and best predicting parameters appears, overwhelmingly, to be concatenation over the last 4 layers, subtoken aggregation by summation and a threshold of 0.6+. The thresholding result is interesting, in particular, because it indicates that the model is capped at a best accuracy of 75% under these conditions. For a threshold greater than 0.6, for these parameters, the model is predicting no entities outside of the three classes meaning, even with perfect prediction of every other entity, the model would never predict the 4th, MISC class. This is also the trend among the best performing parameters. This is indicative of an interesting point: trying to cluster MISC entities will not work as they are inherently dissimilar and the context vectors for entities within the PER, LOC and ORG clusters are not similar enough to set a reasonable threshold to exclude MISC entities.
+
+An obvious note about these results is that the grid search was not comprehensive. Because of the number of permutations, only a limited scope was resonable explored. The layer ranges were chosen to be the last as they contain the most context specific information but combinations of earlier layers may contain more relevant information for the task. Taking non sequential layers or even all layers may also be more informative. That being said, given that the majority of the contextual information is concentrated in the final few layers, it is unlikely; hence, why they were not explored.
+
+The final criticism to make about these results is that the context vectors are token dependent. For a given token $t$, the context vector for $t$ is very different to context vector $t\prime$, even if tokens $t_{-n}, \dots, t_{-1}, t_{+1}, \dots, t_{+m}$ are the same. Therefore, it is likely that the model will only perform effectively on seen vocabulary/contexts. Initially, masking the central token was conducted but results were extremely poor i.e. almost random.
