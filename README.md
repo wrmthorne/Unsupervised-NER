@@ -1,5 +1,7 @@
 # Fully Unsupervised Named Entity Classification
 
+`Please cite this project if you use it in your work.`
+
 `FOREWARNING:` This algorithm does not perform exceptionally well. There may be means to improve this idea but as it is tangential to my research, I am leaving this here for now. Full discussion of evaluation and results can be found at the bottom.
 
 This concept was based on a [towards data science article](https://towardsdatascience.com/ssl-could-avoid-supervised-learning-fd049a27cd1b) by [Ajit Rajasekharan](https://ajitrajasekharan.medium.com/) which used BERT vectors to classify named entities in text. The issue I had with this "unsupervised" approach was the amount of labelled seed data required. This appears to be a trend in unsupervised methods for NER and so this project set to rectify the need for any labelled samples for training. Another issue I had with the approach was only using the word embedding layer of the model for clustering. As is well understood, the context of a word can completely change the meaning e.g. "The **bank** robber stood on the river **bank**". This project also aimed to incorporate context into the clustering approach.
