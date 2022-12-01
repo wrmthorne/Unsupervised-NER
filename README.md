@@ -1,6 +1,6 @@
 # Fully Unsupervised Named Entity Classification
 
-`Please cite this project if you use it in your work.`
+`Citation:` Please cite this project if you use it in your work. A citation file is provided for ease.
 
 `FOREWARNING:` This algorithm does not perform exceptionally well. There may be means to improve this idea but as it is tangential to my research, I am leaving this here for now. Full discussion of evaluation and results can be found at the bottom.
 
