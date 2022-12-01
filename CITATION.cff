@@ -6,6 +6,6 @@ authors:
   orcid: "https://orcid.org/0000-0002-8947-6261"
 title: "Unsupervised-NER"
 version: 1.0.0
-doi: 
+doi: 10.5281/zenodo.7386186
 date-released: 2022-12-01
 url: "https://github.com/wrmthorne/Unsupervised-NER"
